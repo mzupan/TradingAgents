@@ -253,6 +253,17 @@ def format_tokens(n):
     return str(n)
 
 
+def format_cost(usd: float, has_pricing: bool) -> str:
+    """Format USD cost for footer display."""
+    if not has_pricing:
+        return "Cost: --"
+    if usd < 0.0001:
+        return "Cost: <$0.001"
+    if usd < 1.0:
+        return f"Cost: ${usd:.3f}"
+    return f"Cost: ${usd:.2f}"
+
+
 def update_display(layout, spinner_text=None, stats_handler=None, start_time=None):
     # Header with welcome message
     layout["header"].update(
@@ -444,6 +455,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         else:
             tokens_str = "Tokens: --"
         stats_parts.append(tokens_str)
+        stats_parts.append(format_cost(stats["total_cost_usd"], stats["has_pricing"]))
 
     stats_parts.append(f"Reports: {reports_completed}/{reports_total}")
 
@@ -1173,6 +1185,33 @@ def run_analysis(checkpoint: bool = False):
 
     # Post-analysis prompts (outside Live context for clean interaction)
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
+
+    # Final cost summary
+    final_stats = stats_handler.get_stats()
+    cost_usd = final_stats["total_cost_usd"]
+    has_pricing = final_stats["has_pricing"]
+    total_tokens = final_stats["tokens_in"] + final_stats["tokens_out"]
+    if has_pricing:
+        cost_line = f"[bold]Total cost:[/bold] [green]${cost_usd:.4f} USD[/green]"
+    else:
+        cost_line = "[bold]Total cost:[/bold] [dim]N/A (model pricing unknown)[/dim]"
+    tokens_line = (
+        f"[bold]Tokens:[/bold] {format_tokens(final_stats['tokens_in'])}\u2191  "
+        f"{format_tokens(final_stats['tokens_out'])}\u2193  "
+        f"({format_tokens(total_tokens)} total)"
+    )
+    llm_line = (
+        f"[bold]LLM calls:[/bold] {final_stats['llm_calls']}  |  "
+        f"[bold]Tool calls:[/bold] {final_stats['tool_calls']}"
+    )
+    console.print(
+        Panel(
+            f"{cost_line}\n{tokens_line}\n{llm_line}",
+            title="[bold]Usage Summary[/bold]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+    )
 
     # Prompt to save report
     save_choice = typer.prompt("Save report?", default="Y").strip().upper()
