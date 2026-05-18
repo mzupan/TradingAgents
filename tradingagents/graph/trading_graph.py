@@ -68,6 +68,7 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+        self._on_progress = None  # set via set_progress_callback()
 
         # Update the interface's config
         set_config(self.config)
@@ -129,6 +130,10 @@ class TradingAgentsGraph:
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
+
+    def set_progress_callback(self, fn) -> None:
+        """Set a callable(node_name: str) that fires after each graph node completes."""
+        self._on_progress = fn
 
     def _get_provider_kwargs(self) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
@@ -307,7 +312,7 @@ class TradingAgentsGraph:
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date, past_context=past_context
         )
-        args = self.propagator.get_graph_args()
+        args = self.propagator.get_graph_args(callbacks=self.callbacks or None)
 
         # Inject thread_id so same ticker+date resumes, different date starts fresh.
         if self.config.get("checkpoint_enabled"):
@@ -323,6 +328,19 @@ class TradingAgentsGraph:
                     chunk["messages"][-1].pretty_print()
                     trace.append(chunk)
             final_state = trace[-1]
+        elif self._on_progress:
+            # Stream with dual mode so we get node names (updates) + final state (values)
+            final_state = None
+            for mode, chunk in self.graph.stream(
+                init_agent_state,
+                stream_mode=["updates", "values"],
+                config=args.get("config", {}),
+            ):
+                if mode == "updates":
+                    for node_name in chunk:
+                        self._on_progress(node_name)
+                elif mode == "values":
+                    final_state = chunk
         else:
             final_state = self.graph.invoke(init_agent_state, **args)
 
